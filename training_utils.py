@@ -7,6 +7,7 @@ import torch
 import torch.optim
 from data import retrieve_owt_data
 from transformer_lens import HookedTransformer
+import pandas as pd
 
 
 def load_model_data(
@@ -124,3 +125,25 @@ class LinePlot:
 
     def export():
         pass
+
+def plot_losses(x,y, n_layers):
+    f, axes = plt.subplots((n_layers-1)//3 + 1, 3, figsize=(15,15))
+    f, axes_log = plt.subplots((n_layers-1)//3 + 1, 3, figsize=(15,15))
+    modal_lens_loss_pts = pd.DataFrame(x)
+    modal_lens_loss_pts.columns = [f"{x}_modal" for x in modal_lens_loss_pts.columns]
+    tuned_lens_loss_pts = pd.DataFrame(y)
+    tuned_lens_loss_pts.columns = [f"{x}_tuned" for x in tuned_lens_loss_pts.columns]
+    df = modal_lens_loss_pts.merge(tuned_lens_loss_pts, left_index=True, right_index=True)
+
+    for i in range(n_layers):
+        cur_ax = sns.histplot(x=(df[f"{i}_modal"]), y=(df[f"{i}_tuned"]), ax=axes[i // 3, i % 3])
+        cur_ax.set_xlim(df[f"{i}_modal"].quantile(.01), df[f"{i}_modal"].quantile(.99))
+        cur_ax.set_ylim(df[f"{i}_tuned"].quantile(.01), df[f"{i}_tuned"].quantile(.99))
+        min_val = max(cur_ax.get_xlim()[0],cur_ax.get_ylim()[0])
+        max_val = min(cur_ax.get_xlim()[1],cur_ax.get_ylim()[1])
+        cur_ax.plot([min_val, max_val],[min_val, max_val], color="red", linestyle="-")
+
+        cur_ax = sns.histplot(x=np.log(df[f"{i}_modal"]), y=np.log(df[f"{i}_tuned"]), ax=axes_log[i // 3, i % 3])
+        min_val = max(cur_ax.get_xlim()[0],cur_ax.get_ylim()[0])
+        max_val = min(cur_ax.get_xlim()[1],cur_ax.get_ylim()[1])
+        cur_ax.plot([min_val, max_val],[min_val, max_val], color="red", linestyle="-")
