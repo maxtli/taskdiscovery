@@ -1,5 +1,6 @@
 import torch
 from fancy_einsum import einsum
+from torch.nn import functional as F
 
 
 def save_hook_last_token(save_to, act, hook):
@@ -89,15 +90,25 @@ def tuned_lens_hook_dir(
     return new_act
 
 
-def add_dir(dir_tensor, alpha, batch_size, act, hook):
-    # batch_size x tokens x activation
+def add_dir(
+    dir_map,
+    alpha_map,
+    activation_storage,
+    dirs_storage,
+    batch_size,
+    act,
+    hook
+):
+
     pure_residul = act[0:batch_size]
-    device = pure_residul.device
-    bias = torch.zeros_like(pure_residul).to(device)
-    # set last token to be the direction times alpha
+    dir_tensor = dir_map(pure_residul[:, -1])
+    dirs_storage.append(dir_tensor)
+    activation_storage.append(pure_residul[:, -1])
+    bias = torch.zeros_like(pure_residul).to(pure_residul.device)
+   
+    alpha = alpha_map(pure_residul[:, -1])
+
     bias[:, -1, :] = alpha * dir_tensor
-    # batch_size x tokens x activation
-    added_dir = pure_residul + bias
-    # First batch will be pure act
-    new_act = torch.concat([act, added_dir])
+    added_dir = pure_residul - bias
+    new_act = torch.cat([act, added_dir])
     return new_act

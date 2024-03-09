@@ -3,7 +3,7 @@ from functools import partial
 import torch
 import torch.nn.functional as F
 from fancy_einsum import einsum
-from hooks import resid_points_filter, save_hook_last_token, tuned_lens_hook
+from hooks import add_dir, resid_points_filter, save_hook_last_token, tuned_lens_hook
 
 
 def get_lens_loss(
@@ -16,7 +16,7 @@ def get_lens_loss(
     tuned_lens_bias=None,
     shared_bias=False,
     compare_tuned_lens=False,
-    loss_type="kl",
+    return_cross_entropy = False,
 ):
     activation_storage = []
 
@@ -60,16 +60,10 @@ def get_lens_loss(
     resid = model.ln_final(resid)
 
     # layer x batch x d_vocab
-    if loss_type == "kl":
-        logits = model.unembed(resid).softmax(dim=-1)
-        loss = F.kl_div(logits.log(), target_probs, reduction="none").sum(dim=-1)
-    else:
-        logits = model.unembed(resid)
-        loss = F.cross_entropy(
-            logits.reshape(n_layers * batch_size, -1),
-            target_probs.repeat(n_layers, 1),
-            reduction="none",
-        ).reshape(n_layers, batch_size)
+
+    logits = model.unembed(resid)
+    loss = F.kl_div(logits.softmax(dim=-1).log(), target_probs, reduction="none").sum(dim=-1)
+    
 
     if compare_tuned_lens:
 
@@ -83,9 +77,25 @@ def get_lens_loss(
         tuned_lens_losses = F.kl_div(
             tuned_lens_logits.log(), target_probs, reduction="none"
         ).sum(dim=-1)
-        return loss, tuned_lens_losses, activation_storage
+        if return_cross_entropy:
+            ce = F.cross_entropy(
+                logits.reshape(n_layers * batch_size, -1),
+                target_probs.repeat(n_layers, 1),
+                reduction="none",
+            ).reshape(n_layers, batch_size)
+            return loss, ce, activation_storage, target_probs
+
+        return loss, tuned_lens_losses, activation_storage, target_probs
     else:
-        return loss, activation_storage
+        if return_cross_entropy:
+
+            ce = F.cross_entropy(
+                logits.reshape(n_layers * batch_size, -1),
+                target_probs.repeat(n_layers, 1),
+                reduction="none",
+            ).reshape(n_layers, batch_size)
+            return loss,ce, activation_storage, target_probs
+        return loss, activation_storage, target_probs
 
 
 def get_tuned_lens_loss(model, batch, tuned_lens_weights, tuned_lens_bias, n_layers):
@@ -116,3 +126,66 @@ def get_tuned_lens_loss(model, batch, tuned_lens_weights, tuned_lens_bias, n_lay
     kl_losses = F.kl_div(residual.log(), target_probs, reduction="none").sum(dim=-1)
 
     return kl_losses, activation_storage
+
+
+def run_modal_lens_with_dir(
+    model,
+    batch,
+    attn_bias,
+    alpha_maps,
+    dir_maps,
+    batch_size,
+    n_layers,
+    shared_bias=False
+):
+
+    activation_storage = []
+    dirs_storage = []
+
+    output = model.run_with_hooks(
+        batch,
+        fwd_hooks=[
+            *[
+                (
+                    partial(resid_points_filter, layer_no),
+                    partial(
+                        add_dir,
+                        dir_maps[layer_no],
+                        alpha_maps[layer_no],
+                        activation_storage,
+                        dirs_storage,
+                        batch_size,
+                    ),
+                )
+                for layer_no in range(n_layers)
+            ],
+        ],
+    )[:, -1].softmax(dim=-1)
+    resid = []
+
+    for layer_no in range(n_layers):
+
+        if layer_no > 0:
+            resid = torch.cat(
+                [resid_mid, activation_storage[layer_no].unsqueeze(0)], dim=0
+            )
+
+        else:
+            resid = activation_storage[layer_no].unsqueeze(0)
+
+        if shared_bias:
+            attn_bias_layer = attn_bias[layer_no].unsqueeze(0)
+
+        else:
+            attn_bias_layer = attn_bias[layer_no]
+
+        resid_mid = resid + attn_bias_layer.unsqueeze(1)
+        normalized_resid_mid = model.blocks[layer_no].ln2(resid_mid)
+        mlp_out = model.blocks[layer_no].mlp(normalized_resid_mid)
+        resid = resid_mid + mlp_out
+
+    resid = model.ln_final(resid)
+
+    # layer x batch x d_vocab
+    logits = model.unembed(resid)
+    return output, logits, activation_storage, dirs_storage
