@@ -541,9 +541,10 @@ def load_ICL_dataset(task_name: str,
     return dataset
 
 class FVDataset(Dataset):
-    def __init__(self, data_array, tasks):
+    def __init__(self, data_array, tasks, labels):
         self.data_array = data_array
         self.tasks = tasks
+        self.labels = labels
 
     def __len__(self):
         return len(self.data_array)
@@ -557,4 +558,4 @@ class FVDataset(Dataset):
         input_ids = torch.tensor(input_ids, dtype=torch.long)
         attention_mask = torch.tensor(attention_mask, dtype=torch.long)
 
-        return input_ids, attention_mask, self.tasks[idx]
+        return input_ids, attention_mask, self.tasks[idx], self.labels[idx]
