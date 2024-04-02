@@ -8,9 +8,18 @@ import seaborn as sns
 import torch
 import torch.optim
 from data import retrieve_owt_data
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.model_selection import train_test_split
 from transformer_lens import HookedTransformer
+
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import confusion_matrix, accuracy_score,f1_score
+from sklearn.cluster import KMeans,SpectralClustering
+from sklearn.model_selection import train_test_split
+from sklearn.decomposition import PCA
+from scipy.optimize import linear_sum_assignment
+from collections import Counter
+from sklearn.cluster import KMeans, SpectralClustering
 
 def scatter(x,y,n_layers = 12):
   fig, axs = plt.subplots(4,3, figsize = (16,10))
@@ -280,3 +289,55 @@ def show_token_preds(logits, output, tokenizer, sentence):
     )
 
     fig.show()
+
+
+def fit_cluster(x, y, method="kmeans"):
+    """
+    Fits a clustering model to the given data and returns the predicted labels.
+    Also prints the training and test accuracy of the fitted model.
+
+    Parameters:
+    - x: The input data array.
+    - y: The true labels array.
+    - method: The clustering method to use. Defaults to "kmeans".
+
+    Returns:
+    - predicted_labels: The predicted labels for the input data.
+    """
+    label_encoder = LabelEncoder()
+    true_labels = label_encoder.fit_transform(y)
+
+    train_x, test_x, train_y, test_y = train_test_split(x, true_labels)
+
+    if method == "kmeans":
+        clustering_model = KMeans(n_clusters=len(Counter(true_labels)), n_init="auto", random_state=0)
+    elif method == "spectral":
+        clustering_model = SpectralClustering(n_clusters=len(Counter(true_labels)), random_state=0)
+    elif method == "logitreg": LogisticRegression(random_state=0).fit(train_x, train_y)
+    else:
+        raise ValueError("Invalid clustering method")
+
+    predicted_labels = clustering_model.fit_predict(train_x)
+
+    if method == "keaans" or method == "spectral":
+        M = confusion_matrix(train_y, predicted_labels)
+        row, col = linear_sum_assignment(M, maximize=True)
+        mapping = {}
+        for i in range(len(row)):
+            mapping[row[i]] = col[i]
+
+        vectorized_map = np.vectorize(lambda x: mapping.get(x, x))
+        train_y = vectorized_map(train_y)
+        test_y = vectorized_map(test_y)
+
+    # Calculate training accuracy
+    train_accuracy = accuracy_score(train_y, predicted_labels)
+    print(f"Train accuracy: {train_accuracy}")
+
+    test_predict = clustering_model.predict(test_x)
+
+    # Calculate test accuracy
+    test_accuracy = accuracy_score(test_y, test_predict)
+    print(f"Test accuracy: {test_accuracy}")
+
+    return clustering_model.predict(x)
