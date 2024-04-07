@@ -3,6 +3,20 @@ from fancy_einsum import einsum
 from torch.nn import functional as F
 
 
+def save_(save_to, result, hook):
+  save_to.append(result)
+  return result
+
+def attn_filter(name):
+  return name.endswith("attn.hook_result")
+
+def pattern_filter(name):
+  return name.endswith("pattern")
+
+def pre_filter(name):
+  return name.endswith("resid_pre")
+
+
 def save_hook_last_token(save_to, act, hook):
     save_to.append(act[:, -1, :])
 

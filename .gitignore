@@ -1,1 +1,4 @@
 *.csv
+*.json
+.DS_Store
+*.pkl
